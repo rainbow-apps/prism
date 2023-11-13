@@ -1,12 +1,12 @@
 const std = @import("std");
 pub const backend = @import("GraphicsBackend").GraphicsBackend;
 const impl = switch (backend) {
-    .None => @import("none.zig"),
+    .None => @compileError("graphics features not available! compile prism with -Dgraphics=... to enable!"),
     .Metal => @import("metal.zig"),
     .Native => blk: {
         switch (@import("builtin").target.os.tag) {
             .macos => break :blk @import("metal.zig"),
-            else => break :blk @import("none.zig"),
+            else => @compileError("graphics features not available! compile prism with -Dgraphics=... to enable!"),
         }
     },
     else => @compileError("Backend " ++ @tagName(backend) ++ " not yet supported!"),
@@ -20,6 +20,12 @@ pub const Command = union(enum) {
         color: [][4]f32,
         position: [][2]f32,
         counter: usize = 0,
+    },
+
+    PixelShader: struct {
+        pipeline: *anyopaque,
+        frame: u32 = 0,
+        feedback_texture: ?*anyopaque = null,
     },
 
     pub const body = impl.body;
@@ -42,6 +48,8 @@ pub const Renderer = struct {
     pub const destroy = impl.destroy;
     pub const addShader = impl.addShader;
     pub const addPipeline = impl.addPipeline;
+
+    pub const compilePixelShader = impl.compilePixelShader;
     pub const Shader = struct {
         kind: Kind,
         handle: *anyopaque,

@@ -45,7 +45,13 @@ pub fn destroy(self: *Renderer) void {
     self.allocator.destroy(self);
 }
 
-pub fn addShader(self: *Renderer, source: [:0]const u8, kind: Kind, name: ?[:0]const u8) !Shader {
+pub fn compilePixelShader(self: *Renderer, fragment_source: [:0]const u8) !*Pipeline {
+    const frag = try self.addShader(fragment_source, .Fragment, null);
+    const vert = try self.addShader(pixel_vertex_source, .Vertex, null);
+    return try self.addPipeline(vert, frag);
+}
+
+pub fn addShader(self: *Renderer, source: [:0]const u8, kind: Kind, name: ?[:0]const u8) !*Shader {
     var errorObj: objc.c.id = undefined;
 
     const renderer: objc.c.id = @ptrCast(@alignCast(self.handle));
@@ -69,18 +75,18 @@ pub fn addShader(self: *Renderer, source: [:0]const u8, kind: Kind, name: ?[:0]c
 
     if (errorObj != cocoa.nil) {
         cocoa.NSLog(cocoa.NSString("%@").value, errorObj);
+        return error.MetalFailed;
     }
 
-    const shader: Shader = .{
+    const shader = try self.shaders.addOne();
+    shader.* = .{
         .handle = handle.value,
         .kind = kind,
     };
-
-    try self.shaders.append(shader);
     return shader;
 }
 
-pub fn addPipeline(self: *Renderer, vertex_shader: Shader, fragment_shader: Shader) !Pipeline {
+pub fn addPipeline(self: *Renderer, vertex_shader: *const Shader, fragment_shader: *const Shader) !*Pipeline {
     if (vertex_shader.kind != .Vertex or fragment_shader.kind != .Fragment) {
         return error.WrongShaderTypes;
     }
@@ -115,10 +121,10 @@ pub fn addPipeline(self: *Renderer, vertex_shader: Shader, fragment_shader: Shad
         cocoa.NSLog(cocoa.NSString("%@").value, errorObj);
     }
 
-    const pipeline: Pipeline = .{
+    const pipeline = try self.pipelines.addOne();
+    pipeline.* = .{
         .handle = handle.value,
     };
-    try self.pipelines.append(pipeline);
     return pipeline;
 }
 
@@ -168,7 +174,57 @@ pub fn deinit() void {
 pub fn body(self: *Command, renderer: *const Renderer, encoder: *anyopaque) void {
     const encoder_id: objc.c.id = @ptrCast(@alignCast(encoder));
     const command_encoder = objc.Object.fromId(encoder_id);
+    const size: [2]f32 = .{
+        @floatCast(renderer.drawable_size.width),
+        @floatCast(renderer.drawable_size.height),
+    };
     switch (self.*) {
+        .PixelShader => |c| {
+            const pipeline: objc.c.id = @ptrCast(@alignCast(c.pipeline));
+            command_encoder.setProperty("renderPipelineState", .{pipeline});
+            const full_frame: [6][2]f32 = .{ .{ -1, -1 }, .{ -1, 1 }, .{ 1, 1 }, .{ -1, -1 }, .{ 1, -1 }, .{ 1, 1 } };
+            const texture_id = if (c.feedback_texture) |t| blk: {
+                break :blk @as(objc.c.id, @ptrCast(@alignCast(t)));
+            } else blk: {
+                const descriptor = cocoa.alloc("MTLTextureDescriptor")
+                    .msgSend(objc.Object, "init", .{});
+                descriptor.setProperty("height", @as(u64, @intFromFloat(renderer.drawable_size.height)));
+                descriptor.setProperty("width", @as(u64, @intFromFloat(renderer.drawable_size.width)));
+                descriptor.setProperty("usage", @as(u64, 3));
+                const controller_id: objc.c.id = @ptrCast(@alignCast(renderer.handle));
+                const device = objc.Object.fromId(controller_id)
+                    .getProperty(objc.Object, "view")
+                    .getProperty(objc.Object, "device");
+                const t = device.msgSend(objc.Object, "newTextureWithDescriptor:", .{descriptor}).value;
+                self.PixelShader.feedback_texture = t;
+                break :blk t;
+            };
+            command_encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+                @as([*]const u8, @ptrCast(&full_frame)),
+                @as(u64, @sizeOf(@TypeOf(full_frame))),
+                @as(u64, 0),
+            });
+            command_encoder.msgSend(void, "setFragmentTexture:atIndex:", .{
+                texture_id,
+                @as(u64, 0),
+            });
+            command_encoder.msgSend(void, "setFragmentBytes:length:atIndex:", .{
+                @as([*]const u8, @ptrCast(&c.frame)),
+                @as(u64, @sizeOf(u32)),
+                @as(u64, 0),
+            });
+            command_encoder.msgSend(void, "setFragmentBytes:length:atIndex:", .{
+                @as([*]const u8, @ptrCast(&size)),
+                @as(u64, @sizeOf(@TypeOf(size))),
+                @as(u64, 1),
+            });
+            command_encoder.msgSend(void, "drawPrimitives:vertexStart:vertexCount:", .{
+                @as(u64, 3),
+                @as(u64, 0),
+                @as(u64, 6),
+            });
+            self.PixelShader.frame += 1;
+        },
         .TriangleMesh => |c| {
             const pipeline: objc.c.id = @ptrCast(@alignCast(renderer.pipelines.items[0].handle));
             command_encoder.setProperty("renderPipelineState", .{pipeline});
@@ -182,7 +238,7 @@ pub fn body(self: *Command, renderer: *const Renderer, encoder: *anyopaque) void
                 @as(u64, @sizeOf([4]f32) * c.color.len),
                 @as(u64, 1),
             });
-            const size: [2]f32 = .{ @floatCast(renderer.drawable_size.width), @floatCast(renderer.drawable_size.height) };
+
             command_encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
                 @as([*]const u8, @ptrCast(&size)),
                 @as(u64, @sizeOf([2]f32)),
@@ -191,7 +247,7 @@ pub fn body(self: *Command, renderer: *const Renderer, encoder: *anyopaque) void
             command_encoder.msgSend(void, "drawPrimitives:vertexStart:vertexCount:", .{
                 @as(u64, 3),
                 @as(u64, 0),
-                @as(u64, c.color.len),
+                @as(u64, 3),
             });
 
             const delta: f32 = if (c.counter < 60) 5 else -5;
@@ -323,6 +379,20 @@ fn draw(target: objc.c.id, sel: objc.c.SEL, view: objc.c.id) callconv(.C) void {
 }
 
 extern "C" fn MTLCreateSystemDefaultDevice() objc.c.id;
+
+const pixel_vertex_source =
+    \\#include <metal_stdlib>
+    \\using namespace metal;
+    \\
+    \\vertex float4 vertexFn(uint vertexID [[vertex_id]],
+    \\    constant float2 *positions [[buffer (0)]])
+    \\{
+    \\   float4 out = float4(0.0, 0.0, 0.0, 1.0);
+    \\   out.xy = positions[vertexID].xy;
+    \\   return out;
+    \\}
+    \\
+;
 
 const default_vertex_shader =
     \\#include <metal_stdlib>
