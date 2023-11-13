@@ -8,7 +8,8 @@
             .hash = "1220dcb34ec79a9b02c46372a41a446212f2366e7c69c8eba68e88f0f25b5ddf475d",
         },
         .cocoa = .{
-            .path = "../cocoa",
+            .url = "https://github.com/rainbow-apps/cocoa.zig/archive/db36f2f65c2a570f90db3820474e499373813455.tar.gz",
+            .hash = "1220eda8aeb9da916c0193ecbcb6f1a6f66428ca49befc4b49d557f064728d42f450",
         },
     },
 }
