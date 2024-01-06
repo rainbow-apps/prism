@@ -4,12 +4,8 @@
     .version = "0.0.0",
     .dependencies = .{
         .zig_objc = .{
-            .url = "https://github.com/mitchellh/zig-objc/archive/a38331cb6ee366b3f22d0068297810ef14c0c400.tar.gz",
-            .hash = "1220dcb34ec79a9b02c46372a41a446212f2366e7c69c8eba68e88f0f25b5ddf475d",
-        },
-        .cocoa = .{
-            .url = "https://github.com/rainbow-apps/cocoa.zig/archive/db36f2f65c2a570f90db3820474e499373813455.tar.gz",
-            .hash = "1220eda8aeb9da916c0193ecbcb6f1a6f66428ca49befc4b49d557f064728d42f450",
+            .url = "https://github.com/mitchellh/zig-objc/archive/10e552bd37c2f61b9f570d5ceb145165c6f1854b.tar.gz",
+            .hash = "122045926c2a90c61ca2ce907cc83a91ede0d49c989209fff2e2db421a88caf88e91",
         },
     },
 }
