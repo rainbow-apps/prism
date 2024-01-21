@@ -4,8 +4,8 @@
     .version = "0.0.0",
     .dependencies = .{
         .zig_objc = .{
-            .url = "https://github.com/mitchellh/zig-objc/archive/10e552bd37c2f61b9f570d5ceb145165c6f1854b.tar.gz",
-            .hash = "122045926c2a90c61ca2ce907cc83a91ede0d49c989209fff2e2db421a88caf88e91",
+            .url = "https://github.com/mitchellh/zig-objc/archive/f6ed382b6db296626a9b56dadcf9d7e4fcba71d3.tar.gz",
+            .hash = "1220c94dbcdf5a799ce2b1571978ff3c97bab1341fe329084fcc3c06e5d6375469b9",
         },
     },
 }

@@ -9,27 +9,21 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const dependencies: []const std.Build.ModuleDependency = &.{
-        .{
-            .name = "zig-objc",
-            .module = zig_objc.module("objc"),
-        },
-    };
-
-    _ = b.addModule("prism", .{
-        .source_file = .{
-            .path = "src/prism.zig",
-        },
-        .dependencies = dependencies,
+    const prism = b.addModule("prism", .{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = .{ .path = "src/prism.zig" },
+        .link_libc = true,
     });
     const tests = b.addTest(.{
         .root_source_file = .{ .path = "src/prism.zig" },
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
-    for (dependencies) |dep| {
-        tests.addModule(dep.name, dep.module);
-    }
+    tests.root_module.addImport("zig-objc", zig_objc.module("objc"));
+    prism.addImport("zig-objc", zig_objc.module("objc"));
+    prism.linkFramework("Cocoa", .{});
     tests.linkFramework("Cocoa");
     b.installArtifact(tests);
 

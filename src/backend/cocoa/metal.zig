@@ -138,7 +138,6 @@ pub const PixelShader = struct {
         const id: objc.c.id = @ptrCast(@alignCast(widget_to_update.handle));
         const prism_view = objc.Object.fromId(id).getInstanceVariable("view");
         const delegate = prism_view.getInstanceVariable("context");
-        if (!@import("std").mem.eql(u8, delegate.getClassName(), "PrismPixelShaderDelegate")) return;
         const userdata = delegate.getInstanceVariable("userData");
         const buffer = userdata.msgSend(*anyopaque, "contents", .{});
         switch (type_info.Pointer.size) {
@@ -153,7 +152,7 @@ pub const PixelShader = struct {
             },
             .Slice => {
                 const data: [*]T = @ptrCast(@alignCast(buffer));
-                @memcpy(data, new_data);
+                @memcpy(data[0..new_data.len], new_data);
                 const range: cocoa.NSRange = .{
                     .location = 0,
                     .length = @sizeOf(T) * new_data.len,
@@ -196,7 +195,6 @@ pub const PixelShader = struct {
             else
                 @sizeOf(type_info.Pointer.child);
         };
-        const ptr: ?*anyopaque = userdata_bytes;
         const pipeline_id: objc.c.id = @ptrCast(@alignCast(self.handle));
         const pipeline = objc.Object.fromId(pipeline_id);
         const device = pipeline.getProperty(objc.Object, "device");
@@ -206,12 +204,12 @@ pub const PixelShader = struct {
 
         if (size > 0) {
             const opts: ResourceOptions = .{
-                .cache_mode = .WriteCombined,
+                .cache_mode = .Default,
                 .storage_mode = .Managed,
                 .hazard_mode = .Default,
             };
             const buffer = device.msgSend(objc.Object, "newBufferWithBytes:length:options:", .{
-                ptr,
+                @as(*const anyopaque, userdata_bytes),
                 size,
                 @as(u64, @bitCast(opts)),
             });
@@ -247,7 +245,6 @@ pub const PixelShader = struct {
             .presence = PixelShaderWidget.presence,
             .other_teardown = PixelShaderWidget.teardown,
             .draw = PixelShaderWidget.draw,
-            .resize_finished = PixelShaderWidget.resize_ended,
         };
         const block = Layout.Block.init(.{}, PixelShaderWidget.blockFn) catch return error.PlatformCodeFailed;
         const widget_obj = cocoa.alloc("PrismViewController")
@@ -307,7 +304,7 @@ const PixelShaderWidget = struct {
         const id: objc.c.id = @ptrCast(@alignCast(ctx orelse return true));
         const delegate = objc.Object.fromId(id);
         const data = delegate.getInstanceVariable("mouseData");
-        const mouse_data_ptr = data.msgSend(*anyopaque, "bytes", .{});
+        const mouse_data_ptr = data.msgSend(*anyopaque, "contents", .{});
         const mouse_data: *MouseData = @ptrCast(@alignCast(mouse_data_ptr));
         mouse_data.present = is_enter;
         const range: cocoa.NSRange = .{
@@ -339,10 +336,6 @@ const PixelShaderWidget = struct {
             .msgSend(void, "release", .{});
     }
 
-    fn resize_ended(self: *anyopaque) void {
-        _ = self;
-    }
-
     fn blockFn(
         block_ptr: *const Layout.Block.Context,
         self: objc.c.id,
@@ -356,11 +349,11 @@ const PixelShaderWidget = struct {
         const options: *const prism.Widget.Options = @ptrCast(@alignCast(opts));
         const actual_new_size: cocoa.NSSize = .{
             .width = switch (options.width) {
-                .fraction => new_size.width,
+                .fraction => |f| new_size.width * f,
                 .pixels => |p| p,
             },
             .height = switch (options.height) {
-                .fraction => new_size.height,
+                .fraction => |f| new_size.height * f,
                 .pixels => |p| p,
             },
         };

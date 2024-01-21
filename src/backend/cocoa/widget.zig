@@ -23,7 +23,6 @@ pub fn init() prism.AppError!void {
     PrismView.replaceMethod("mouseEntered:", mousePresence);
     PrismView.replaceMethod("mouseExited:", mousePresence);
     PrismView.replaceMethod("drawRect:", draw);
-    PrismView.replaceMethod("viewDidEndLiveResize", resizeEnded);
     PrismView.replaceMethod("acceptsFirstResponder", acceptsFirstResponder);
     if (!PrismView.addIvar("options")) return error.PlatformCodeFailed;
     if (!PrismView.addIvar("context")) return error.PlatformCodeFailed;
@@ -65,6 +64,29 @@ fn initWithZigStruct(
     self.setInstanceVariable("context", .{ .value = ctxt });
 
     self.msgSendSuper(objc.getClass("NSView").?, void, "initWithFrame:", .{frame});
+
+    if (ptr.hover != null or ptr.presence != null) {
+        const area_options: cocoa.NSTrackingAreaOptions = .{
+            .active_always = false,
+            .active_in_active_app = false,
+            .active_in_key_window = true,
+            .active_when_first_responder = true,
+            .assume_inside = false,
+            .enabled_during_drag = false,
+            .entered_and_exited = ptr.presence != null,
+            .in_visible_rect = true,
+            .mouse_moved = ptr.hover != null,
+        };
+        const tracking_area = cocoa.alloc("NSTrackingArea")
+            .msgSend(objc.Object, "initWithRect:options:owner:userInfo:", .{
+                cocoa.NSRect.make(0, 0, 0, 0),
+                @as(u64, @bitCast(area_options)),
+                self.value,
+                cocoa.nil,
+        });
+        defer tracking_area.msgSend(void, "release", .{});
+        self.msgSend(void, "addTrackingArea:", .{tracking_area});
+    }
     
     return self.value;
 }
@@ -220,15 +242,5 @@ fn draw(target: objc.c.id, sel: objc.c.SEL, rect: cocoa.NSRect) callconv(.C) voi
         .msgSend(*const anyopaque, "bytes", .{});
     const opts: *const prism.Widget.Options = @ptrCast(@alignCast(opts_ptr));
     opts.draw(self.value);
-}
-
-fn resizeEnded(target: objc.c.id, sel: objc.c.SEL) callconv(.C) void {
-    _ = sel;
-    const self = objc.Object.fromId(target);
-    const opts_ptr = self.getInstanceVariable("options")
-        .msgSend(*const anyopaque, "bytes", .{});
-    const opts: *const prism.Widget.Options = @ptrCast(@alignCast(opts_ptr));
-    if (opts.resize_finished) |f| f(self.value);
-    self.msgSendSuper(objc.getClass("NSView").?, void, "viewDidEndLiveResize", .{});
 }
     

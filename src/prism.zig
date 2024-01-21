@@ -83,23 +83,30 @@ fn Prism(comptime T: type) type {
             pub const create = T.Layout.create;
             pub const destroy = T.Layout.destroy;
 
-            pub const desiredDimensions = T.Layout.desiredDimensions;
-
-            pub const Options = struct {
-                width: Amount,
-                height: Amount,
-                kind: union(Kind) {
-                    Box: struct {
-                        margins: struct {
-                            left: Amount,
-                            right: Amount,
-                            top: Amount,
-                            bottom: Amount,
-                        },
+            pub const Options = union(Kind) {
+                Box: struct {
+                    margins: struct {
+                        left: Amount,
+                        right: Amount,
+                        top: Amount,
+                        bottom: Amount,
                     },
                 },
+                Vertical: struct {
+                    content_alignment: enum { top, bottom, center },
+                    child_alignment: enum { left, right, center },
+                    spacing: Amount,
+                },
+                Horizontal: struct {
+                    content_alignment: enum { left, right, center },
+                    child_alignment: enum { top, bottom, center },
+                    spacing: Amount,
+                },
+
                 const Kind = enum {
                     Box,
+                    Vertical,
+                    Horizontal,
                 };
             };
             /// for specifying sizes in either absolute (pixels) or relative (fraction) terms
@@ -112,7 +119,6 @@ fn Prism(comptime T: type) type {
             /// opaque pointer to backend-specific representation of the widget
             handle: *anyopaque,
 
-            pub const toLayout = T.Widget.toLayout;
             pub const destroy = T.Widget.destroy;
 
             pub const Options = struct {
@@ -125,7 +131,6 @@ fn Prism(comptime T: type) type {
                 click: ?*const ClickFn,
                 drag: ?*const DragFn,
                 other_teardown: ?*const OtherFn,
-                resize_finished: ?*const OtherFn,
             };
 
             pub const DrawFn = fn (self: *anyopaque) void;
@@ -135,6 +140,19 @@ fn Prism(comptime T: type) type {
             pub const DragFn = fn (ctx: ?*anyopaque, x: f64, y: f64, button: MouseButton) bool;
             pub const OtherFn = fn (self: *anyopaque) void;
             // key
+        };
+
+        pub const NativeButton = struct {
+            pub const widget = T.NativeButton.widget;
+
+            // pub const update = T.NativeButton.update;
+
+            pub const Options = struct {
+                text: [:0]const u8,
+                /// called on mouse down
+                action: *const fn (ctx: ?*anyopaque) void,
+                ctx: ?*anyopaque,
+            };
         };
 
         const This = @This();
@@ -215,7 +233,7 @@ fn Prism(comptime T: type) type {
     };
 }
 
-test {
+test "run tests" {
     switch (builtin.os.tag) {
         .linux => {
             _ = Gtk.Graphics(.Native);
@@ -231,4 +249,46 @@ test {
         },
         else => {},
     }
+}
+
+test "basic button" {
+    @import("std").testing.log_level = .info;
+    const Inner = struct {
+        fn action(_: ?*anyopaque) void {
+            @import("std").log.info("clicked!", .{});
+        }
+    };
+
+    const This = @This();
+    try This.init();
+    defer This.deinit();
+
+    const window = try This.Window.create(.{
+        .title = "prism-test",
+        .size = .{
+            .width = 500,
+            .height = 500,
+        },
+        .exit_on_close = true,
+    });
+    defer window.destroy();
+    window.setContent(try This.Layout.create(.{ .Horizontal = .{
+        .content_alignment = .center,
+        .child_alignment = .center,
+        .spacing = .{ .fraction = 0.05 },
+    } }, .{
+        try This.NativeButton.widget(.{
+            .text = "click me!",
+            .action = Inner.action,
+            .ctx = null,
+        }),
+        try This.NativeButton.widget(.{
+            .text = "or me!",
+            .action = Inner.action,
+            .ctx = null,
+        }),
+    }));
+
+    This.run();
+    defer This.stop();
 }

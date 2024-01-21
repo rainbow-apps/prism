@@ -3,119 +3,36 @@ const cocoa = @import("cocoa.zig");
 const objc = @import("zig-objc");
 
 pub fn init() prism.AppError!void {
-    const PrismViewController = objc.allocateClassPair(
-        objc.getClass("NSObject") orelse return error.PlatformCodeFailed,
-        "PrismViewController",
-    ) orelse return error.PlatformCodeFailed;
-    defer objc.registerClassPair(PrismViewController);
-    if (!(PrismViewController.addMethod("initWithZigStruct:size:block:", initWithZigStruct) catch return error.PlatformCodeFailed))
-        return error.PlatformCodeFailed;
-    if (!(PrismViewController.addMethod("attemptResizeWithSize:init:", attemptResize) catch return error.PlatformCodeFailed))
-        return error.PlatformCodeFailed;
-    if (!PrismViewController.addIvar("data")) return error.PlatformCodeFailed;
-    if (!PrismViewController.addIvar("layoutSize")) return error.PlatformCodeFailed;
-    if (!PrismViewController.addIvar("layoutBlock")) return error.PlatformCodeFailed;
-    if (!PrismViewController.addIvar("view")) return error.PlatformCodeFailed;
+    {
+        const PrismViewController = objc.allocateClassPair(
+            objc.getClass("NSObject") orelse return error.PlatformCodeFailed,
+            "PrismViewController",
+        ) orelse return error.PlatformCodeFailed;
+        defer objc.registerClassPair(PrismViewController);
+        if (!(PrismViewController.addMethod("initWithZigStruct:size:block:", initWithZigStruct) catch return error.PlatformCodeFailed))
+            return error.PlatformCodeFailed;
+        if (!(PrismViewController.addMethod("attemptResizeWithSize:init:", attemptResize) catch return error.PlatformCodeFailed))
+            return error.PlatformCodeFailed;
+        if (!(PrismViewController.addMethod("childViewControllers", childViewControllers) catch return error.PlatformCodeFailed))
+            return error.PlatformCodeFailed;
+        if (!(PrismViewController.addMethod("addChildViewController:", addChildViewController) catch return error.PlatformCodeFailed))
+            return error.PlatformCodeFailed;
+        if (!PrismViewController.addIvar("data")) return error.PlatformCodeFailed;
+        if (!PrismViewController.addIvar("layoutBlock")) return error.PlatformCodeFailed;
+        if (!PrismViewController.addIvar("children")) return error.PlatformCodeFailed;
+        if (!PrismViewController.addIvar("view")) return error.PlatformCodeFailed;
+    }
 }
 
 pub fn create(options: prism.Layout.Options, children: anytype) prism.Layout.Error!prism.Layout {
-    const block = Block.init(.{}, (struct {
-        fn blockFn(
-            block_ptr: *const Block.Context,
-            self: objc.c.id,
-            new_size: cocoa.NSSize,
-            init_view: objc.c.BOOL,
-        ) callconv(.C) cocoa.NSSize {
-            _ = block_ptr;
-            const controller = objc.Object.fromId(self);
-            const size = controller.getInstanceVariable("layoutSize");
-            const current_size = size.msgSend(cocoa.NSRect, "sizeValue", .{});
-            const data = controller.getInstanceVariable("data")
-                .msgSend(*anyopaque, "bytes", .{});
-            const blk_options: *prism.Layout.Options = @ptrCast(@alignCast(data));
-
-            const actual_new_size: cocoa.NSSize = .{
-                .height = switch (blk_options.height) {
-                    .fraction => new_size.height,
-                    .pixels => |p| p,
-                },
-                .width = switch (blk_options.width) {
-                    .fraction => new_size.width,
-                    .pixels => |p| p,
-                },
-            };
-
-            switch (blk_options.kind) {
-                .Box => |box| {
-                    const width_trim: f64 = switch (box.margins.left) {
-                        .pixels => |p| p,
-                        .fraction => |f| actual_new_size.width * f,
-                    } + switch (box.margins.right) {
-                        .pixels => |p| p,
-                        .fraction => |f| actual_new_size * f,
-                    };
-                    const height_trim: f64 = switch (box.margins.top) {
-                        .pixels => |p| p,
-                        .fraction => |f| actual_new_size.height * f,
-                    } + switch (box.margins.bottom) {
-                        .pixels => |p| p,
-                        .fraction => |f| actual_new_size.height * f,
-                    };
-                    const child_size: cocoa.NSSize = .{
-                        .width = actual_new_size.width - width_trim,
-                        .height = actual_new_size.height - height_trim,
-                    };
-                    if (child_size.height < 0 or child_size.width < 0) return current_size;
-                    const child = controller.getProperty(objc.Object, "childViewControllers")
-                        .msgSend(objc.Object, "objectAtIndex:", .{@as(u64, 0)});
-                    const new_child_size = child.msgSend(cocoa.NSSize, "attemptResizeWithSize:init:", .{
-                        child_size, init_view,
-                    });
-                    const set_size_to: cocoa.NSSize = .{
-                        .width = new_child_size.width + width_trim,
-                        .height = new_child_size + height_trim,
-                    };
-                    if (init_view == cocoa.YES) {
-                        const view = cocoa.alloc("NSView")
-                            .msgSend(objc.Object, "initWithFrame:", .{
-                            cocoa.NSRect{
-                                .origin = .{ .x = 0, .y = 0 },
-                                .size = set_size_to,
-                            },
-                        });
-                        controller.setInstanceVariable("view", view);
-                        const child_view = child.getProperty(objc.Object, "view");
-                        view.msgSend(void, "addSubview:", .{child_view});
-                    } else {
-                        controller.getProperty(objc.Object, "view")
-                            .msgSend(void, "setFrameSize:", .{set_size_to});
-                    }
-                    const new_origin: cocoa.NSPoint = .{
-                        .x = switch (box.margins.left) {
-                            .pixels => |p| p,
-                            .fraction => |f| set_size_to.width * f,
-                        },
-                        .y = switch (box.margins.bottom) {
-                            .pixels => |p| p,
-                            .fraction => |f| set_size_to.height * f,
-                        },
-                    };
-                    const child_view = child.getProperty(objc.Object, "view");
-                    child_view.msgSend(void, "setFrameOrigin:", .{new_origin});
-                    child_view.setProperty("needsDisplay", .{cocoa.YES});
-                    size.msgSend(void, "release", .{});
-                    const ivar = objc.getClass("NSValue").?
-                        .msgSend(objc.Object, "valueWithSize:", .{set_size_to});
-                    controller.setInstanceVariable("layoutSize", ivar);
-                    return set_size_to;
-                },
-            }
-        }
-    }).blockFn) catch return error.PlatformCodeFailed;
+    const block = switch (options) {
+        .Box => Block.init(.{}, boxBlockFn) catch return error.PlatformCodeFailed,
+        .Horizontal, .Vertical => Block.init(.{}, horizontalVerticalBlockFn) catch return error.PlatformCodeFailed,
+    };
     const controller = cocoa.alloc("PrismViewController")
         .msgSend(objc.Object, "initWithZigStruct:size:block:", .{
         &options,
-        @sizeOf(prism.Layout.Options),
+        @as(u64, @sizeOf(prism.Layout.Options)),
         block.context,
     });
 
@@ -123,12 +40,12 @@ pub fn create(options: prism.Layout.Options, children: anytype) prism.Layout.Err
     comptime {
         @import("std").debug.assert(info == .Struct);
         @import("std").debug.assert(info.Struct.is_tuple);
-        if (options.kind == .Box) @import("std").debug.assert(info.Struct.fields.len == 1);
         for (info.Struct.fields) |field| {
             @import("std").debug.assert(field.type == prism.Layout or field.type == prism.Widget);
         }
     }
-    for (@typeInfo(@TypeOf(children)).Struct.fields) |field| {
+    if (options == .Box) @import("std").debug.assert(info.Struct.fields.len == 1);
+    inline for (info.Struct.fields) |field| {
         const layout = @field(children, field.name);
         const layout_id: objc.c.id = @ptrCast(@alignCast(layout.handle));
         const layout_obj = objc.Object.fromId(layout_id);
@@ -147,7 +64,7 @@ pub fn destroy(self: prism.Layout) void {
     view.msgSend(void, "release", .{});
     controller.getInstanceVariable("data")
         .msgSend(void, "release", .{});
-    const block: Block = .{
+    var block: Block = .{
         .context = @ptrCast(@alignCast(controller.getInstanceVariable("layoutBlock").value)),
     };
     block.deinit();
@@ -176,14 +93,9 @@ fn initWithZigStruct(
     });
     self.setInstanceVariable("data", data);
     self.setInstanceVariable("layoutBlock", objc.Object.fromId(layout_block));
-    const layout_size = objc.getClass("NSValue").?
-        .msgSend(objc.Object, "valueWithSize:", .{
-        cocoa.NSSize{
-            .width = 0,
-            .height = 0,
-        },
-    });
-    self.setInstanceVariable("layoutSize", layout_size);
+    const children = cocoa.alloc("NSMutableArray")
+        .msgSend(objc.Object, "init", .{});
+    self.setInstanceVariable("children", children);
     return self.value;
 }
 
@@ -200,4 +112,236 @@ fn attemptResize(
         .context = @ptrCast(@alignCast(layout_block.value)),
     };
     return block.invoke(.{ target, new_size, init_view });
+}
+
+fn childViewControllers(
+    target: objc.c.id,
+    sel: objc.c.SEL,
+) callconv(.C) objc.c.id {
+    _ = sel; // autofix
+    const self = objc.Object.fromId(target);
+    const children = self.getInstanceVariable("children");
+    return children.value;
+}
+
+fn addChildViewController(
+    target: objc.c.id,
+    sel: objc.c.SEL,
+    child: objc.c.id,
+) callconv(.C) void {
+    _ = sel; // autofix
+    const self = objc.Object.fromId(target);
+    const children = self.getInstanceVariable("children");
+    children.msgSend(void, "addObject:", .{child});
+}
+
+fn boxBlockFn(
+    block_ptr: *const Block.Context,
+    self: objc.c.id,
+    new_size: cocoa.NSSize,
+    init_view: objc.c.BOOL,
+) callconv(.C) cocoa.NSSize {
+    _ = block_ptr; // autofix
+    const controller = objc.Object.fromId(self);
+    const data = controller.getInstanceVariable("data")
+        .msgSend(*const anyopaque, "bytes", .{});
+    const options: *const prism.Layout.Options = @ptrCast(@alignCast(data));
+    const child = controller.msgSend(objc.Object, "childViewControllers", .{})
+        .msgSend(objc.Object, "objectAtIndex:", .{@as(u64, 0)});
+    const new_child_size = child.msgSend(cocoa.NSSize, "attemptResizeWithSize:init:", .{
+        new_size, init_view,
+    });
+    const width_trim: f64 = switch (options.Box.margins.left) {
+        .pixels => |p| p,
+        .fraction => |f| new_child_size.width * f,
+    } + switch (options.Box.margins.right) {
+        .pixels => |p| p,
+        .fraction => |f| new_child_size.height * f,
+    };
+    const height_trim: f64 = switch (options.Box.margins.top) {
+        .pixels => |p| p,
+        .fraction => |f| new_child_size.height * f,
+    } + switch (options.Box.margins.bottom) {
+        .pixels => |p| p,
+        .fraction => |f| new_child_size.height * f,
+    };
+    const set_size_to: cocoa.NSSize = .{
+        .width = new_child_size.width + width_trim,
+        .height = new_child_size.height + height_trim,
+    };
+    if (init_view == cocoa.YES) {
+        const view = cocoa.alloc("NSView")
+            .msgSend(objc.Object, "initWithFrame:", .{
+            cocoa.NSRect{
+                .origin = .{ .x = 0, .y = 0 },
+                .size = set_size_to,
+            },
+        });
+        controller.setInstanceVariable("view", view);
+        const child_view = child.getInstanceVariable("view");
+        view.msgSend(void, "addSubview:", .{child_view});
+    } else {
+        controller.getInstanceVariable("view")
+            .msgSend(void, "setFrameSize:", .{set_size_to});
+    }
+    const new_origin: cocoa.NSPoint = .{
+        .x = switch (options.Box.margins.left) {
+            .pixels => |p| p,
+            .fraction => |f| set_size_to.width * f,
+        },
+        .y = switch (options.Box.margins.bottom) {
+            .pixels => |p| p,
+            .fraction => |f| set_size_to.height * f,
+        },
+    };
+    const child_view = child.getInstanceVariable("view");
+    child_view.msgSend(void, "setFrameOrigin:", .{new_origin});
+    child_view.setProperty("needsDisplay", .{cocoa.YES});
+    return set_size_to;
+}
+
+fn horizontalVerticalBlockFn(
+    _: *const Block.Context,
+    self: objc.c.id,
+    new_size: cocoa.NSSize,
+    init_view: objc.c.BOOL,
+) callconv(.C) cocoa.NSSize {
+    const controller = objc.Object.fromId(self);
+    const data = controller.getInstanceVariable("data")
+        .msgSend(*const anyopaque, "bytes", .{});
+    const options: *const prism.Layout.Options = @ptrCast(@alignCast(data));
+    const children = controller.msgSend(objc.Object, "childViewControllers", .{});
+    var size: cocoa.NSSize = .{ .height = 0, .width = 0 };
+
+    const count = children.getProperty(u64, "count");
+    for (0..@intCast(count)) |idx| {
+        const object = children.msgSend(objc.Object, "objectAtIndex:", .{@as(u64, @intCast(idx))});
+        const got_size = object.msgSend(cocoa.NSSize, "attemptResizeWithSize:init:", .{
+            new_size,
+            init_view,
+        });
+        switch (options.*) {
+            .Box => unreachable,
+            .Horizontal => |o| {
+                const space = switch (o.spacing) {
+                    .fraction => |f| new_size.width * f,
+                    .pixels => |p| p,
+                };
+                if (idx > 0) size.width += space;
+                size.width += got_size.width;
+                if (got_size.height > size.height)
+                    size.height = got_size.height;
+            },
+            .Vertical => |o| {
+                const space = switch (o.spacing) {
+                    .fraction => |f| new_size.height * f,
+                    .pixels => |p| p,
+                };
+                if (idx > 0) size.height += space;
+                size.height += got_size.height;
+                if (got_size.width > size.width)
+                    size.width = got_size.width;
+            },
+        }
+    }
+
+    const ret_size: cocoa.NSSize = .{
+        .width = switch (options.*) {
+            .Box => unreachable,
+            .Horizontal => if (new_size.width > size.width) new_size.width else size.width,
+            .Vertical => size.width,
+        },
+        .height = switch (options.*) {
+            .Box => unreachable,
+            .Horizontal => size.height,
+            .Vertical => if (new_size.height > size.height) new_size.height else size.height,
+        },
+    };
+
+    if (init_view == cocoa.YES) {
+        const view = cocoa.alloc("NSView")
+            .msgSend(objc.Object, "initWithFrame:", .{
+            cocoa.NSRect{
+                .origin = .{ .x = 0, .y = 0 },
+                .size = ret_size,
+            },
+        });
+        controller.setInstanceVariable("view", view);
+        for (0..@intCast(count)) |idx| {
+            const child = children.msgSend(objc.Object, "objectAtIndex:", .{@as(u64, @intCast(idx))});
+            const child_view = child.getInstanceVariable("view");
+            view.msgSend(void, "addSubview:", .{child_view});
+        }
+    } else {
+        controller.getInstanceVariable("view")
+            .msgSend(void, "setFrameSize:", .{ret_size});
+    }
+
+    var position: f64 = 0;
+
+    const spacing = switch (options.*) {
+        .Box => unreachable,
+        .Horizontal => |o| switch (o.spacing) {
+            .fraction => |f| new_size.width * f,
+            .pixels => |p| p,
+        },
+        .Vertical => |o| switch (o.spacing) {
+            .fraction => |f| new_size.height * f,
+            .pixels => |p| p,
+        },
+    };
+
+    for (0..@intCast(count)) |idx| {
+        const object = children.msgSend(objc.Object, "objectAtIndex:", .{@as(u64, @intCast(idx))});
+        const view = object.getInstanceVariable("view");
+        const frame = view.getProperty(cocoa.NSRect, "frame");
+        switch (options.*) {
+            .Box => unreachable,
+            .Horizontal => |o| {
+                if (idx == 0) {
+                    switch (o.content_alignment) {
+                        .left => position = 0,
+                        .right => position = ret_size.width - size.width,
+                        .center => position = (ret_size.width - size.width) / 2,
+                    }
+                } else {
+                    position += spacing;
+                }
+                const y: f64 = switch (o.child_alignment) {
+                    .top => size.height - frame.size.height,
+                    .center => (size.height - frame.size.height) / 2,
+                    .bottom => 0,
+                };
+                const point: cocoa.NSPoint = .{
+                    .x = position,
+                    .y = y,
+                };
+                view.msgSend(void, "setFrameOrigin:", .{point});
+                position += frame.size.width;
+            },
+            .Vertical => |o| {
+                if (idx == 0) {
+                    switch (o.content_alignment) {
+                        .top => position = ret_size.height,
+                        .bottom => position = size.height,
+                        .center => position = size.height + (ret_size.height - size.height) / 2,
+                    }
+                } else {
+                    position -= spacing;
+                }
+                position -= frame.size.height;
+                const x: f64 = switch (o.child_alignment) {
+                    .right => size.width - frame.size.width,
+                    .center => (size.width - frame.size.width) / 2,
+                    .left => 0,
+                };
+                const point: cocoa.NSPoint = .{
+                    .x = x,
+                    .y = position,
+                };
+                view.msgSend(void, "setFrameOrigin:", .{point});
+            },
+        }
+    }
+    return ret_size;
 }

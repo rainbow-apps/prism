@@ -98,3 +98,18 @@ pub const NSRect = extern struct {
         };
     }
 };
+
+pub const NSTrackingAreaOptions = packed struct(u64) {
+    entered_and_exited: bool,
+    mouse_moved: bool,
+    cursor_update: bool = false,
+    _unused: bool = false,
+    active_when_first_responder: bool,
+    active_in_key_window: bool,
+    active_in_active_app: bool,
+    active_always: bool,
+    assume_inside: bool,
+    in_visible_rect: bool,
+    enabled_during_drag: bool,
+    _padding: u53 = 0,
+};

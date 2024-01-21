@@ -4,6 +4,8 @@ const builtin = @import("builtin");
 pub const Window = @import("cocoa/window.zig");
 pub const Layout = @import("cocoa/layout.zig");
 pub const Widget = @import("cocoa/widget.zig");
+const native = @import("cocoa/native.zig");
+pub const NativeButton = native.NativeButton;
 
 // graphics implementations
 pub const Metal = @import("cocoa/metal.zig");
@@ -26,6 +28,7 @@ pub fn init() prism.AppError!void {
     try Window.init();
     try Layout.init();
     try Widget.init();
+    try native.setup();
     _ = cocoa.NSApp();
 }
 
