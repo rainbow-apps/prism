@@ -203,7 +203,7 @@ fn boxBlockFn(
 fn horizontalVerticalBlockFn(
     _: *const Block.Context,
     self: objc.c.id,
-    new_size: cocoa.NSSize,
+    in_size: cocoa.NSSize,
     init_view: objc.c.BOOL,
 ) callconv(.C) cocoa.NSSize {
     const controller = objc.Object.fromId(self);
@@ -212,6 +212,25 @@ fn horizontalVerticalBlockFn(
     const options: *const prism.Layout.Options = @ptrCast(@alignCast(data));
     const children = controller.msgSend(objc.Object, "childViewControllers", .{});
     var size: cocoa.NSSize = .{ .height = 0, .width = 0 };
+
+    const new_size: cocoa.NSSize = .{
+        .height = switch (options.*) {
+            .Box => unreachable,
+            .Horizontal => in_size.height,
+            .Vertical => |o| switch (o.container_size) {
+                .fraction => |f| in_size.height * f,
+                .pixels => |p| p,
+            },
+        },
+        .width = switch (options.*) {
+            .Box => unreachable,
+            .Horizontal => |o| switch (o.container_size) {
+                .fraction => |f| in_size.width * f,
+                .pixels => |p| p,
+            },
+            .Vertical => in_size.width,
+        },
+    };
 
     const count = children.getProperty(u64, "count");
     for (0..@intCast(count)) |idx| {

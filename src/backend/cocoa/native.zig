@@ -15,11 +15,9 @@ pub const NativeButton = struct {
             .height = .{ .fraction = 1 },
             .click = Widget.click,
             .hover = null,
-            .context = delegate.value,
+            .user_ctx = delegate.value,
             .presence = Widget.presence,
-            .other_teardown = Widget.teardown,
             .drag = null,
-            .draw = Widget.draw,
         };
 
         const block = Layout.Block.init(.{}, Widget.blockFn) catch return error.PlatformCodeFailed;
@@ -33,22 +31,6 @@ pub const NativeButton = struct {
     }
 
     const Widget = struct {
-        fn teardown(self: *anyopaque) void {
-            const id: objc.c.id = @ptrCast(@alignCast(self));
-            const prism_view = objc.Object.fromId(id);
-            prism_view.getProperty(objc.Object, "subviews")
-                .msgSend(objc.Object, "objectAtIndex:", .{@as(u64, 0)})
-                .msgSend(void, "release", .{});
-        }
-
-        fn draw(self: *anyopaque) void {
-            const id: objc.c.id = @ptrCast(@alignCast(self));
-            const prism_view = objc.Object.fromId(id);
-            prism_view.getProperty(objc.Object, "subviews")
-                .msgSend(objc.Object, "objectAtIndex:", .{@as(u64, 0)})
-                .setProperty("needsDisplay", .{cocoa.YES});
-        }
-
         fn click(ctx: ?*anyopaque, x: f64, y: f64, button: prism.MouseButton, is_release: bool) bool {
             _ = ctx; // autofix
             _ = x; // autofix
@@ -76,7 +58,7 @@ pub const NativeButton = struct {
             const opts = controller.getInstanceVariable("data")
                 .msgSend(*const anyopaque, "bytes", .{});
             const options: *const prism.Widget.Options = @ptrCast(@alignCast(opts));
-            const id: objc.c.id = @ptrCast(@alignCast(options.context.?));
+            const id: objc.c.id = @ptrCast(@alignCast(options.user_ctx.?));
             const delegate = objc.Object.fromId(id);
             if (init_view == cocoa.YES) {
                 const view = cocoa.alloc("PrismView")

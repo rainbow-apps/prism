@@ -22,7 +22,6 @@ pub fn init() prism.AppError!void {
     PrismView.replaceMethod("otherMouseDragged:", mouseDragged);
     PrismView.replaceMethod("mouseEntered:", mousePresence);
     PrismView.replaceMethod("mouseExited:", mousePresence);
-    PrismView.replaceMethod("drawRect:", draw);
     PrismView.replaceMethod("acceptsFirstResponder", acceptsFirstResponder);
     if (!PrismView.addIvar("options")) return error.PlatformCodeFailed;
     if (!PrismView.addIvar("context")) return error.PlatformCodeFailed;
@@ -33,24 +32,18 @@ pub fn destroy(self: prism.Widget) void {
     const widget = objc.Object.fromId(self_id);
     const opts = widget.getInstanceVariable("options");
     defer opts.msgSend(void, "release", .{});
-    const opts_ptr = opts.msgSend(*anyopaque, "bytes", .{});
-    const options: *prism.Widget.Options = @ptrCast(@alignCast(opts_ptr));
     const ctx = widget.getInstanceVariable("context");
     defer ctx.msgSend(void, "release", .{});
-    if (options.other_teardown) |teardown| {
-        teardown(widget.value);
-    }
     widget.msgSend(void, "release", .{});
 }
 
 fn initWithZigStruct(
     target: objc.c.id,
-    sel: objc.c.SEL,
+    _: objc.c.SEL,
     zig_struct: *const anyopaque,
     size: u64,
     frame: cocoa.NSRect,
 ) callconv(.C) objc.c.id {
-    _ = sel;
     const self = objc.Object.fromId(target);
     const ptr: *const prism.Widget.Options = @ptrCast(@alignCast(zig_struct));
     const data = objc.getClass("NSData").?
@@ -60,7 +53,7 @@ fn initWithZigStruct(
     });
     self.setInstanceVariable("options", data);
 
-    const ctxt: objc.c.id = if (ptr.context) |ctx| @ptrCast(@alignCast(ctx)) else cocoa.nil;
+    const ctxt: objc.c.id = if (ptr.user_ctx) |ctx| @ptrCast(@alignCast(ctx)) else cocoa.nil;
     self.setInstanceVariable("context", .{ .value = ctxt });
 
     self.msgSendSuper(objc.getClass("NSView").?, void, "initWithFrame:", .{frame});
@@ -231,16 +224,5 @@ fn mouseDragged(target: objc.c.id, sel: objc.c.SEL, event_id: objc.c.id) callcon
         const next = self.getProperty(objc.Object, "nextResponder");
         next.msgSend(void, Sel, .{event_id});
     }
-}
-
-fn draw(target: objc.c.id, sel: objc.c.SEL, rect: cocoa.NSRect) callconv(.C) void {
-    _ = sel;
-    _ = rect;
-
-    const self = objc.Object.fromId(target);
-    const opts_ptr = self.getInstanceVariable("options")
-        .msgSend(*const anyopaque, "bytes", .{});
-    const opts: *const prism.Widget.Options = @ptrCast(@alignCast(opts_ptr));
-    opts.draw(self.value);
 }
     

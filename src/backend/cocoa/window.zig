@@ -107,6 +107,7 @@ fn loadWindow(target: objc.c.id, sel: objc.c.SEL) callconv(.C) void {
         .miniaturizable = options.miniaturizable,
         .resizable = options.resizable,
         .titled = title.value != null,
+        .fullsize_content_view = true,
     };
     const window = cocoa.alloc("NSWindow")
         .msgSend(objc.Object, "initWithContentRect:styleMask:backing:defer:", .{
@@ -116,10 +117,10 @@ fn loadWindow(target: objc.c.id, sel: objc.c.SEL) callconv(.C) void {
         cocoa.NO,
     });
     defer window.msgSend(void, "release", .{});
-    window.setProperty("delegate", .{self});
-    self.setProperty("window", .{window});
-    window.setProperty("isVisible", .{cocoa.YES});
-    if (title.value) |_| window.setProperty("title", .{title});
+    window.setProperty("delegate", self);
+    self.setProperty("window", window);
+    window.setProperty("isVisible", cocoa.YES);
+    if (title.value) |_| window.setProperty("title", title);
 }
 
 fn initWithZigStruct(
