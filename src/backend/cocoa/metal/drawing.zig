@@ -7,6 +7,8 @@ const src = @embedFile("drawing.metal");
 
 const RenderStep = enum(u64) {
     point,
+    fill,
+    line,
 };
 
 pub fn setup() prism.AppError!void {
@@ -84,6 +86,436 @@ pub fn compile(rendering_context: objc.Object) prism.Graphics.Err!void {
     try unwrap(err_obj);
     rendering_context.getInstanceVariable("apiPipelines")
         .msgSend(void, "addObject:", .{pt_pipeline});
+
+    err_obj = undefined;
+    const rect_desc = desc: {
+        const vtx = getFunction(lib, "rectVtxFn");
+        defer vtx.msgSend(void, "release", .{});
+        const frag = getFunction(lib, "rectFragFn");
+        defer frag.msgSend(void, "release", .{});
+
+        const descriptor = cocoa.alloc("MTLRenderPipelineDescriptor")
+            .msgSend(objc.Object, "init", .{});
+        descriptor.msgSend(void, "reset", .{});
+        descriptor.setProperty("vertexFunction", vtx);
+        descriptor.setProperty("fragmentFunction", frag);
+        const attachment = cocoa.alloc("MTLRenderPipelineColorAttachmentDescriptor")
+            .msgSend(objc.Object, "init", .{});
+        defer attachment.msgSend(void, "release", .{});
+        attachment.setProperty("pixelFormat", @as(u64, 80));
+        attachment.setProperty("blendingEnabled", cocoa.YES);
+        attachment.setProperty("destinationAlphaBlendFactor", @as(u64, 1));
+
+        descriptor.getProperty(objc.Object, "colorAttachments")
+            .msgSend(void, "setObject:atIndexedSubscript:", .{
+            attachment,
+            @as(u64, 0),
+        });
+        break :desc descriptor;
+    };
+    defer rect_desc.msgSend(void, "release", .{});
+    const rect_pipeline = device.msgSend(objc.Object, "newRenderPipelineStateWithDescriptor:error:", .{
+        rect_desc,
+        &err_obj,
+    });
+    try unwrap(err_obj);
+    rendering_context.getInstanceVariable("apiPipelines")
+        .msgSend(void, "addObject:", .{rect_pipeline});
+
+    err_obj = undefined;
+    const line_desc = desc: {
+        const vtx = getFunction(lib, "lineVtxFn");
+        defer vtx.msgSend(void, "release", .{});
+        const frag = getFunction(lib, "rectFragFn");
+        defer frag.msgSend(void, "release", .{});
+
+        const descriptor = cocoa.alloc("MTLRenderPipelineDescriptor")
+            .msgSend(objc.Object, "init", .{});
+        descriptor.msgSend(void, "reset", .{});
+        descriptor.setProperty("vertexFunction", vtx);
+        descriptor.setProperty("fragmentFunction", frag);
+        const attachment = cocoa.alloc("MTLRenderPipelineColorAttachmentDescriptor")
+            .msgSend(objc.Object, "init", .{});
+        defer attachment.msgSend(void, "release", .{});
+        attachment.setProperty("pixelFormat", @as(u64, 80));
+        attachment.setProperty("blendingEnabled", cocoa.YES);
+        attachment.setProperty("destinationAlphaBlendFactor", @as(u64, 1));
+
+        descriptor.getProperty(objc.Object, "colorAttachments")
+            .msgSend(void, "setObject:atIndexedSubscript:", .{
+            attachment,
+            @as(u64, 0),
+        });
+        break :desc descriptor;
+    };
+    defer line_desc.msgSend(void, "release", .{});
+    const line_pipeline = device.msgSend(objc.Object, "newRenderPipelineStateWithDescriptor:error:", .{
+        line_desc,
+        &err_obj,
+    });
+    try unwrap(err_obj);
+    rendering_context.getInstanceVariable("apiPipelines")
+        .msgSend(void, "addObject:", .{line_pipeline});
+}
+
+fn transformMatrix(bounds: [2]f32) [4][4]f32 {
+    return .{
+        .{ 4 / bounds[0], 0, 0, 0 },
+        .{ 0, -4 / bounds[1], 0, 0 },
+        .{ 1, 1, 1, 0 },
+        .{ -1, 1, 0, 1 },
+    };
+}
+
+const VertexInner = extern struct {
+    color: [4]f32,
+    position: [4]f32,
+};
+
+const RectLineInner = extern struct {
+    color: [4]f32,
+    origin: [2]f32,
+    opposite: [2]f32,
+    thickness: [4]f32,
+};
+
+pub fn rect(wid: prism.Widget, data: prism.Graphics.Drawing.RectLineData) void {
+    const encoder, const size = getEncoderAndSize(wid, .line);
+    const matrix = transformMatrix(size);
+    const color: [4]f32 = .{ data.color.r, data.color.g, data.color.b, data.color.a };
+    const s: f32 = if (data.origin.y > data.opposite.y) -1 else 1;
+    const pts: [4]RectLineInner = .{
+        .{
+            .color = color,
+            .origin = .{ data.origin.x, data.origin.y - s * data.thickness },
+            .opposite = .{ data.origin.x, data.opposite.y + s * data.thickness },
+            .thickness = .{ data.thickness, 0, 0, 0 },
+        },
+        .{
+            .color = color,
+            .origin = .{ data.origin.x, data.opposite.y },
+            .opposite = .{ data.opposite.x, data.opposite.y },
+            .thickness = .{ data.thickness, 0, 0, 0 },
+        },
+        .{
+            .color = color,
+            .origin = .{ data.opposite.x, data.opposite.y + s * data.thickness },
+            .opposite = .{ data.opposite.x, data.origin.y - s *  data.thickness },
+            .thickness = .{ data.thickness, 0, 0, 0 },
+        },
+        .{
+            .color = color,
+            .origin = .{ data.opposite.x, data.origin.y },
+            .opposite = .{ data.origin.x, data.origin.y },
+            .thickness = .{ data.thickness, 0, 0, 0 },
+        },
+    };
+    encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+        @as([*]const u8, @ptrCast(&pts)),
+        @as(u64, @sizeOf([4]RectLineInner)),
+        @as(u64, 0),
+    });
+    encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+        @as([*]const u8, @ptrCast(&matrix)),
+        @as(u64, @sizeOf(@TypeOf(matrix))),
+        @as(u64, 1),
+    });
+    encoder.msgSend(void, "drawPrimitives:vertexStart:vertexCount:", .{
+        @as(u64, 3),
+        @as(u64, 0),
+        @as(u64, 6 * 4),
+    });
+    encoder.msgSend(void, "endEncoding", .{});
+}
+
+pub fn rects(wid: prism.Widget, data: []prism.Graphics.Drawing.RectLineData) void {
+    var pt_buf: [4 * 256]RectLineInner = undefined;
+    var idx: usize = 0;
+    while (idx < data.len) {
+        const encoder, const size = getEncoderAndSize(wid, .line);
+        const matrix = transformMatrix(size);
+        const end: usize = @min(256, data.len - idx);
+        for (0..end, data[idx..][0..end]) |i, p| {
+            const color: [4]f32 = .{ p.color.r, p.color.g, p.color.b, p.color.a };
+            const s: f32 = if (p.origin.y > p.opposite.y) -1 else 1;
+            pt_buf[i * 4 ..][0..4].* = .{
+                .{
+                    .color = color,
+                    .origin = .{ p.origin.x, p.origin.y - s * p.thickness },
+                    .opposite = .{ p.origin.x, p.opposite.y + s * p.thickness },
+                    .thickness = .{ p.thickness, 0, 0, 0 },
+                },
+                .{
+                    .color = color,
+                    .origin = .{ p.origin.x, p.opposite.y },
+                    .opposite = .{ p.opposite.x, p.opposite.y },
+                    .thickness = .{ p.thickness, 0, 0, 0 },
+                },
+                .{
+                    .color = color,
+                    .origin = .{ p.opposite.x, p.opposite.y + s * p.thickness },
+                    .opposite = .{ p.opposite.x, p.origin.y - s * p.thickness },
+                    .thickness = .{ p.thickness, 0, 0, 0 },
+                },
+                .{
+                    .color = color,
+                    .origin = .{ p.opposite.x, p.origin.y },
+                    .opposite = .{ p.origin.x, p.origin.y },
+                    .thickness = .{ p.thickness, 0, 0, 0 },
+                },
+            };
+        }
+        encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+            @as([*]const u8, @ptrCast(pt_buf[0 .. 4 * end].ptr)),
+            @as(u64, end * @sizeOf([4]RectLineInner)),
+            @as(u64, 0),
+        });
+        encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+            @as([*]const u8, @ptrCast(&matrix)),
+            @as(u64, @sizeOf(@TypeOf(matrix))),
+            @as(u64, 1),
+        });
+        encoder.msgSend(void, "drawPrimitives:vertexStart:vertexCount:", .{
+            @as(u64, 3),
+            @as(u64, 0),
+            @as(u64, 6 * 4 * end),
+        });
+        encoder.msgSend(void, "endEncoding", .{});
+        idx += end;
+    }
+}
+
+pub fn line(wid: prism.Widget, data: prism.Graphics.Drawing.RectLineData) void {
+    const encoder, const size = getEncoderAndSize(wid, .line);
+    const matrix = transformMatrix(size);
+    const pts: RectLineInner = .{
+        .color = .{ data.color.r, data.color.g, data.color.b, data.color.a },
+        .origin = .{ data.origin.x, data.origin.y },
+        .opposite = .{ data.opposite.x, data.opposite.y },
+        .thickness = .{ data.thickness, 0, 0, 0 },
+    };
+    encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+        @as([*]const u8, @ptrCast(&pts)),
+        @as(u64, @sizeOf(RectLineInner)),
+        @as(u64, 0),
+    });
+    encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+        @as([*]const u8, @ptrCast(&matrix)),
+        @as(u64, @sizeOf(@TypeOf(matrix))),
+        @as(u64, 1),
+    });
+    encoder.msgSend(void, "drawPrimitives:vertexStart:vertexCount:", .{
+        @as(u64, 3),
+        @as(u64, 0),
+        @as(u64, 6),
+    });
+    encoder.msgSend(void, "endEncoding", .{});
+}
+
+pub fn lines(wid: prism.Widget, data: []prism.Graphics.Drawing.RectLineData) void {
+    var pt_buf: [1024]RectLineInner = undefined;
+    var idx: usize = 0;
+    while (idx < data.len) {
+        const encoder, const size = getEncoderAndSize(wid, .line);
+        const matrix = transformMatrix(size);
+        const end: usize = @min(1024, data.len - idx);
+        for (0..end, data[idx..][0..end]) |i, p| {
+            pt_buf[i] = .{
+                .color = .{ p.color.r, p.color.g, p.color.b, p.color.a },
+                .origin = .{ p.origin.x, p.origin.y },
+                .opposite = .{ p.opposite.x, p.opposite.y },
+                .thickness = .{ p.thickness, 0, 0, 0 },
+            };
+        }
+        encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+            @as([*]const u8, @ptrCast(pt_buf[0..end].ptr)),
+            @as(u64, end * @sizeOf(RectLineInner)),
+            @as(u64, 0),
+        });
+        encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+            @as([*]const u8, @ptrCast(&matrix)),
+            @as(u64, @sizeOf(@TypeOf(matrix))),
+            @as(u64, 1),
+        });
+        encoder.msgSend(void, "drawPrimitives:vertexStart:vertexCount:", .{
+            @as(u64, 3),
+            @as(u64, 0),
+            @as(u64, 6 * end),
+        });
+        encoder.msgSend(void, "endEncoding", .{});
+        idx += end;
+    }
+}
+
+pub fn tri(wid: prism.Widget, data: [3]prism.Graphics.Drawing.VertexData) void {
+    const encoder, const size = getEncoderAndSize(wid, .fill);
+    const matrix = transformMatrix(size);
+    const pts: [3]VertexInner = .{
+        .{
+            .color = .{ data[0].color.r, data[0].color.g, data[0].color.b, data[0].color.a },
+            .position = .{ data[0].point.x, data[0].point.y, 0, 0 },
+        },
+        .{
+            .color = .{ data[1].color.r, data[1].color.g, data[1].color.b, data[1].color.a },
+            .position = .{ data[1].point.x, data[1].point.y, 0, 0 },
+        },
+        .{
+            .color = .{ data[2].color.r, data[2].color.g, data[2].color.b, data[2].color.a },
+            .position = .{ data[2].point.x, data[2].point.y, 0, 0 },
+        },
+    };
+    encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+        @as([*]const u8, @ptrCast(&pts)),
+        @as(u64, 3 * @sizeOf(VertexInner)),
+        @as(u64, 0),
+    });
+    encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+        @as([*]const u8, @ptrCast(&matrix)),
+        @as(u64, @sizeOf(@TypeOf(matrix))),
+        @as(u64, 1),
+    });
+    encoder.msgSend(void, "drawPrimitives:vertexStart:vertexCount:", .{
+        @as(u64, 3),
+        @as(u64, 0),
+        @as(u64, 3),
+    });
+    encoder.msgSend(void, "endEncoding", .{});
+}
+
+pub fn mesh(wid: prism.Widget, data: []prism.Graphics.Drawing.VertexData) void {
+    var pt_buf: [3 * 256]VertexInner = undefined;
+    var idx: usize = 0;
+    while (idx < data.len) {
+        const encoder, const size = getEncoderAndSize(wid, .fill);
+        const matrix = transformMatrix(size);
+        const end: usize = @min(3 * 256, data.len - idx);
+        vertexInnerFromVertex(data[idx..][0..end], pt_buf[0..end]);
+        encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+            @as([*]const u8, @ptrCast(pt_buf[0..end].ptr)),
+            @as(u64, end * @sizeOf(VertexInner)),
+            @as(u64, 0),
+        });
+        encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+            @as([*]const u8, @ptrCast(&matrix)),
+            @as(u64, @sizeOf(@TypeOf(matrix))),
+            @as(u64, 1),
+        });
+        encoder.msgSend(void, "drawPrimitives:vertexStart:vertexCount:", .{
+            @as(u64, 3),
+            @as(u64, 0),
+            @as(u64, end),
+        });  
+        encoder.msgSend(void, "endEncoding", .{});
+        idx += end;
+    }
+}
+
+pub fn quad(wid: prism.Widget, data: [4]prism.Graphics.Drawing.VertexData) void {
+    const encoder, const size = getEncoderAndSize(wid, .fill);
+    const matrix = transformMatrix(size);
+    const pts: [4]VertexInner = .{
+        .{
+            .color = .{ data[0].color.r, data[0].color.g, data[0].color.b, data[0].color.a },
+            .position = .{ data[0].point.x, data[0].point.y, 0, 0 },
+        },
+        .{
+            .color = .{ data[1].color.r, data[1].color.g, data[1].color.b, data[1].color.a },
+            .position = .{ data[1].point.x, data[1].point.y, 0, 0 },
+        },
+        .{
+            .color = .{ data[2].color.r, data[2].color.g, data[2].color.b, data[2].color.a },
+            .position = .{ data[2].point.x, data[2].point.y, 0, 0 },
+        },
+        .{
+            .color = .{ data[3].color.r, data[3].color.g, data[3].color.b, data[3].color.a },
+            .position = .{ data[3].point.x, data[3].point.y, 0, 0 },
+        },
+    };
+    encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+        @as([*]const u8, @ptrCast(&pts)),
+        @as(u64, 6 * @sizeOf(VertexInner)),
+        @as(u64, 0),
+    });
+    encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+        @as([*]const u8, @ptrCast(&matrix)),
+        @as(u64, @sizeOf(@TypeOf(matrix))),
+        @as(u64, 1),
+    });
+    encoder.msgSend(void, "drawPrimitives:vertexStart:vertexCount:", .{
+        @as(u64, 4),
+        @as(u64, 0),
+        @as(u64, 4),
+    });
+    encoder.msgSend(void, "endEncoding", .{});
+}
+
+pub fn rect_fill(wid: prism.Widget, data: prism.Graphics.Drawing.RectFillData) void {
+    const encoder, const size = getEncoderAndSize(wid, .fill);
+    const matrix = transformMatrix(size);
+
+    const color: [4]f32 = .{ data.color.r, data.color.g, data.color.b, data.color.a };
+    const pts: [6]VertexInner = .{
+        .{ .color = color, .position = .{ data.origin.x, data.origin.y, 0, 0 } },
+        .{ .color = color, .position = .{ data.origin.x, data.opposite.y, 0, 0 } },
+        .{ .color = color, .position = .{ data.opposite.x, data.opposite.y, 0, 0 } },
+        .{ .color = color, .position = .{ data.origin.x, data.origin.y, 0, 0 } },
+        .{ .color = color, .position = .{ data.opposite.x, data.origin.y, 0, 0 } },
+        .{ .color = color, .position = .{ data.opposite.x, data.opposite.y, 0, 0 } },
+    };
+    encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+        @as([*]const u8, @ptrCast(&pts)),
+        @as(u64, 6 * @sizeOf(VertexInner)),
+        @as(u64, 0),
+    });
+    encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+        @as([*]const u8, @ptrCast(&matrix)),
+        @as(u64, @sizeOf(@TypeOf(matrix))),
+        @as(u64, 1),
+    });
+    encoder.msgSend(void, "drawPrimitives:vertexStart:vertexCount:", .{
+        @as(u64, 3),
+        @as(u64, 0),
+        @as(u64, 6),
+    });
+    encoder.msgSend(void, "endEncoding", .{});
+}
+
+pub fn rects_fill(wid: prism.Widget, data: []prism.Graphics.Drawing.RectFillData) void {
+    var pt_buf: [6 * 256]VertexInner = undefined;
+    var idx: usize = 0;
+    while (idx < data.len) {
+        const encoder, const size = getEncoderAndSize(wid, .fill);
+        const matrix = transformMatrix(size);
+        const end: usize = @min(256, data.len - idx);
+        for (0..end, data[idx..][0..end]) |i, p| {
+            const color: [4]f32 = .{ p.color.r, p.color.g, p.color.b, p.color.a };
+            pt_buf[i * 6 ..][0..6].* = .{
+                .{ .color = color, .position = .{ p.origin.x, p.origin.y, 0, 0 } },
+                .{ .color = color, .position = .{ p.opposite.x, p.origin.y, 0, 0 } },
+                .{ .color = color, .position = .{ p.opposite.x, p.opposite.y, 0, 0 } },
+                .{ .color = color, .position = .{ p.origin.x, p.origin.y, 0, 0 } },
+                .{ .color = color, .position = .{ p.origin.x, p.opposite.y, 0, 0 } },
+                .{ .color = color, .position = .{ p.opposite.x, p.opposite.y, 0, 0 } },
+            };
+        }
+        encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+            @as([*]const u8, @ptrCast(pt_buf[0 .. 6 * end].ptr)),
+            @as(u64, end * @sizeOf(PointInner)),
+            @as(u64, 0),
+        });
+        encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
+            @as([*]const u8, @ptrCast(&matrix)),
+            @as(u64, @sizeOf(@TypeOf(matrix))),
+            @as(u64, 1),
+        });
+        encoder.msgSend(void, "drawPrimitives:vertexStart:vertexCount:", .{
+            @as(u64, 0),
+            @as(u64, 0),
+            @as(u64, 6 * end),
+        });
+        encoder.msgSend(void, "endEncoding", .{});
+        idx += end;
+    }
 }
 
 const PointInner = extern struct {
@@ -94,8 +526,13 @@ const PointInner = extern struct {
 
 pub fn point(wid: prism.Widget, point_data: prism.Graphics.Drawing.PointData) void {
     const encoder, const size = getEncoderAndSize(wid, .point);
+    const matrix = transformMatrix(size);
 
-    const pt: PointInner = .{ .color = .{ point_data.color.r, point_data.color.g, point_data.color.b, point_data.color.a }, .position = .{ point_data.point.x, point_data.point.y }, .size = point_data.size };
+    const pt: PointInner = .{
+        .color = .{ point_data.color.r, point_data.color.g, point_data.color.b, point_data.color.a },
+        .position = .{ point_data.point.x, point_data.point.y },
+        .size = point_data.size,
+    };
 
     encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
         @as([*]const u8, @ptrCast(&pt)),
@@ -103,8 +540,8 @@ pub fn point(wid: prism.Widget, point_data: prism.Graphics.Drawing.PointData) vo
         @as(u64, 0),
     });
     encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
-        @as([*]const u8, @ptrCast(&size)),
-        @as(u64, @sizeOf(@TypeOf(size))),
+        @as([*]const u8, @ptrCast(&matrix)),
+        @as(u64, @sizeOf(@TypeOf(matrix))),
         @as(u64, 1),
     });
     encoder.msgSend(void, "drawPrimitives:vertexStart:vertexCount:", .{
@@ -120,6 +557,7 @@ pub fn points(wid: prism.Widget, point_data: []prism.Graphics.Drawing.PointData)
     var idx: usize = 0;
     while (idx < point_data.len) {
         const encoder, const size = getEncoderAndSize(wid, .point);
+        const matrix = transformMatrix(size);
         const end: usize = @min(1024, point_data.len - idx);
         for (0..end, point_data[idx..][0..end]) |i, p| {
             pt_buf[i] = .{
@@ -134,8 +572,8 @@ pub fn points(wid: prism.Widget, point_data: []prism.Graphics.Drawing.PointData)
             @as(u64, 0),
         });
         encoder.msgSend(void, "setVertexBytes:length:atIndex:", .{
-            @as([*]const u8, @ptrCast(&size)),
-            @as(u64, @sizeOf(@TypeOf(size))),
+            @as([*]const u8, @ptrCast(&matrix)),
+            @as(u64, @sizeOf(@TypeOf(matrix))),
             @as(u64, 1),
         });
         encoder.msgSend(void, "drawPrimitives:vertexStart:vertexCount:", .{
@@ -316,4 +754,11 @@ fn getFunction(lib: objc.Object, fn_name: [:0]const u8) objc.Object {
     const v_n = cocoa.NSString(fn_name);
     defer v_n.msgSend(void, "release", .{});
     return lib.msgSend(objc.Object, "newFunctionWithName:", .{v_n});
+}
+
+fn vertexInnerFromVertex(in: []const prism.Graphics.Drawing.VertexData, out: []VertexInner) void {
+    for (in, out) |i, *o| {
+        o.color = .{ i.color.r, i.color.g, i.color.b, i.color.a };
+        o.position = .{ i.point.x, i.point.y, 0, 0 };
+    }
 }

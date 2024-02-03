@@ -235,11 +235,38 @@ pub const Graphics = struct {
         pub const redisplay = G.Drawing.redisplay;
         pub const point = G.Drawing.point;
         pub const points = G.Drawing.points;
+        pub const rect = G.Drawing.rect;
+        pub const rects = G.Drawing.rects;
+        pub const rect_fill = G.Drawing.rect_fill;
+        pub const rects_fill = G.Drawing.rects_fill;
+        pub const quad = G.Drawing.quad;
+        pub const tri = G.Drawing.tri;
+        pub const line = G.Drawing.line;
+        pub const lines = G.Drawing.lines;
+        pub const mesh = G.Drawing.mesh;
 
         pub const PointData = struct {
             color: Color,
             point: Point,
             size: f32,
+        };
+
+        pub const RectLineData = struct {
+            color: Color,
+            origin: Point,
+            opposite: Point,
+            thickness: f32,
+        };
+
+        pub const RectFillData = struct {
+            color: Color,
+            origin: Point,
+            opposite: Point,
+        };
+
+        pub const VertexData = struct {
+            color: Color,
+            point: Point,
         };
     };
 
@@ -259,27 +286,56 @@ test "run tests" {
 }
 
 test "drawing" {
+    const eps = 0.00001;
     const inner = struct {
-        fn draw(wid: Widget) void {
+        fn draw(wid: Widget) !void {
             const std = @import("std");
             var r = std.rand.DefaultPrng.init(@intCast(@max(std.time.nanoTimestamp(), 0)));
+            var pts: [25][2]f32 = undefined;
+            var col: [25]Graphics.Color = undefined;
             const random = r.random();
             while (true) {
-                std.time.sleep(std.time.ns_per_s / 4);
-                const pt: Graphics.Drawing.PointData = .{
-                    .color = .{
+                std.time.sleep(std.time.ns_per_s / 2);
+                inline for (0..25) |i| {
+                    pts[i] = .{
+                        100 + 500 * random.float(f32),
+                        100 + 400 * random.float(f32),
+                    };
+                    col[i] = .{
                         .r = random.float(f32),
                         .g = random.float(f32),
                         .b = random.float(f32),
-                        .a = random.float(f32),
-                    },
-                    .point = .{
-                        .x = 500 * random.float(f32),
-                        .y = 400 * random.float(f32),
-                    },
-                    .size = 40 * random.float(f32),
+                        .a = 0.5,
+                    };
+                }
+                const del = @import("math/delaunay.zig");
+                const triangulation = del.delaunay(
+                    std.testing.allocator,
+                    &pts,
+                    eps,
+                ) catch |err| switch (err) {
+                    error.BadMesh => continue,
+                    else => return err,
                 };
-                Graphics.Drawing.point(wid, pt);
+                defer std.testing.allocator.free(triangulation);
+                const mesh = try std.testing.allocator.alloc(Graphics.Drawing.VertexData, triangulation.len * 3);
+                defer std.testing.allocator.free(mesh);
+                for (triangulation, 0..) |tri, i| {
+                    inline for (mesh[i * 3 ..][0..3], tri) |*v, t| {
+                        v.color = color: {
+                            for (0..25) |j| {
+                                if (t[0] == pts[j][0] and t[1] == pts[j][1])
+                                    break :color col[j];
+                            }
+                            unreachable;
+                        };
+                        v.point = .{
+                            .x = t[0],
+                            .y = t[1],
+                        };
+                    }
+                }
+                Graphics.Drawing.mesh(wid, mesh);
                 Graphics.Drawing.redisplay(wid);
             }
         }
@@ -295,8 +351,8 @@ test "drawing" {
     const window = try Window.create(.{
         .title = "prism-drawing-test",
         .size = .{
-            .width = 500,
-            .height = 400,
+            .width = 700,
+            .height = 600,
         },
         .exit_on_close = true,
     });
